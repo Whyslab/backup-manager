@@ -37,7 +37,6 @@ done
 SRC_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 
 OPT_DIR="${PREFIX}/opt/backup-manager"
-ETC_DIR="${PREFIX}/etc/backup-manager"
 BIN_DIR="${PREFIX}/usr/local/bin"
 UNIT_DIR="${PREFIX}/etc/systemd/system"
 LOGROTATE="${PREFIX}/etc/logrotate.d/backup-manager"
@@ -141,8 +140,11 @@ fi
 
 say "Creating command symlinks"
 run install -d -m 755 "$BIN_DIR"
-run ln -sfn /opt/backup-manager/bm                "${BIN_DIR}/bm"
-run ln -sfn /opt/backup-manager/ui/rofi_menu.sh   "${BIN_DIR}/backup-manager"
+# The link target must be the path the code was actually installed to. With a
+# --prefix sandbox that is inside the prefix; pointing at a bare /opt would
+# produce a dangling link that only resolves on a machine with a real install.
+run ln -sfn "${OPT_DIR}/bm"                "${BIN_DIR}/bm"
+run ln -sfn "${OPT_DIR}/ui/rofi_menu.sh"   "${BIN_DIR}/backup-manager"
 ok "bm and backup-manager available on PATH"
 
 say "Creating log and state directories"

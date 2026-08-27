@@ -205,7 +205,8 @@ cmd_restore() {
     for p in "$@"; do paths+=("${p#/}"); done
 
     if (( to_system == 0 )); then
-        local staging="${RESTORE_STAGING}/bm-restore-$(date +%Y%m%d_%H%M%S)"
+        local staging
+        staging="${RESTORE_STAGING}/bm-restore-$(date +%Y%m%d_%H%M%S)"
         install -d -m 700 "$staging"
         log_step "Extracting to ${staging} (the live system is not touched)"
         ( cd "$staging" && borg extract --list "::${archive}" "${paths[@]}" )

@@ -262,7 +262,7 @@ archives outlive this wrapper.
 bash tests/run-tests.sh
 ```
 
-55 checks: shell syntax, JSON validity, that the status module emits valid JSON
+57 checks: shell syntax, JSON validity, that the status module emits valid JSON
 in every state (missing file, corrupt file, fresh, stale), that every menu entry
 resolves and dispatches, that a sandbox install can be fully undone, that sizes
 do not change with the system locale, and that nothing personal is shipped.

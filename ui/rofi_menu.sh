@@ -143,6 +143,8 @@ act_edit()    { term "\${EDITOR:-nano} '$SOURCES_FILE' && echo 'Checking:' && '$
 
 # --- menus --------------------------------------------------------------
 
+# Read through the `local -n` nameref in show_menu, which ShellCheck cannot follow.
+# shellcheck disable=SC2034
 MAIN=(
     "backup1|󰆓  Back up — essentials only"
     "backupF|󰆓  Back up — absolutely everything"
@@ -151,6 +153,7 @@ MAIN=(
     "more|󰇘  More…"
 )
 
+# shellcheck disable=SC2034
 MORE=(
     "umount|󰅖  Close the opened backup"
     "list|󰋊  All backups — list"

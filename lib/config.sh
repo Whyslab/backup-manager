@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # lib/config.sh — the one place where sources.json becomes borg arguments.
 
+# Filled in by config_load and read by bm and lib/engine.sh, which source this
+# file. ShellCheck sees only one file at a time and reports them as unused.
+# shellcheck disable=SC2034
 # Filled in by config_load
 REAL_USER=""; REAL_HOME=""; REPO=""; PASSPHRASE_FILE=""; COMPRESSION=""
 MOUNT_POINT=""; RESTORE_STAGING=""; STALE_AFTER_HOURS=""; DRILL_SAMPLE_SIZE=""
@@ -63,7 +66,7 @@ build_tier() {
     done < <(jq -r '.never[]?' "$SOURCES_FILE")
 
     # Sources: a path plus its own exclusions, anchored to that path.
-    local line src_path src_excludes abs
+    local line src_path abs
     while IFS= read -r line; do
         src_path=$(jq -r '.path' <<<"$line")
         abs=$(expand_path "$src_path")

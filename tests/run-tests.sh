@@ -205,6 +205,17 @@ for p in opt/backup-manager/bm usr/local/bin/bm etc/systemd/system/bm-backup.tim
     [[ -e "$SB/$p" ]] && ok "installed: /$p" || nok "not installed: /$p"
 done
 
+# A symlink whose target does not exist inside the sandbox would still pass an
+# -e check on a machine that happens to have a real install at the same path.
+for l in usr/local/bin/bm usr/local/bin/backup-manager; do
+    target=$(readlink -f "$SB/$l" 2>/dev/null || echo "")
+    if [[ "$target" == "$SB"/* && -e "$target" ]]; then
+        ok "symlink /$l resolves inside the sandbox"
+    else
+        nok "symlink /$l points outside the sandbox" "target: ${target:-<dangling>}"
+    fi
+done
+
 # The generated settings must carry no leftover placeholders.
 if grep -q '__[A-Z_]*__' "$SB/opt/backup-manager/config/settings.json" 2>/dev/null; then
     nok "settings.json still contains placeholders" "$(grep -o '__[A-Z_]*__' "$SB/opt/backup-manager/config/settings.json" | sort -u | tr '\n' ' ')"
