@@ -1,0 +1,24 @@
+{
+  "_comment": "Copied to config/settings.json by install.sh, which fills in target_user and the repository path.",
+  "target_user": "__USER__",
+  "targets": [
+    {
+      "name": "local",
+      "type": "borg",
+      "repo": "__HOME__/backup/borg-repo",
+      "enabled": true,
+      "tiers": [1, 2]
+    }
+  ],
+  "passphrase_file": "/etc/backup-manager/passphrase",
+  "compression": "zstd,3",
+  "retention": {
+    "bm-t1":   { "keep_daily": 7, "keep_weekly": 4, "keep_monthly": 0 },
+    "bm-full": { "keep_daily": 0, "keep_weekly": 4, "keep_monthly": 6 }
+  },
+  "mount_point": "/mnt/backup",
+  "restore_staging": "/var/tmp",
+  "stale_after_hours": 48,
+  "drill_sample_size": 50,
+  "export_packages": true
+}

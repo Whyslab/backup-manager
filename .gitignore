@@ -1,0 +1,13 @@
+# Local configuration produced by install.sh — never the template.
+config/settings.json
+config/sources.json
+
+# Anything the tool writes at runtime.
+*.log
+*.orig-*
+status.json
+archives.txt
+
+# Editors and OS noise
+*.swp
+.DS_Store

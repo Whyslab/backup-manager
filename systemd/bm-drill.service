@@ -1,0 +1,13 @@
+[Unit]
+Description=Restore drill and deep verification
+After=local-fs.target
+ConditionPathExists=/etc/backup-manager/passphrase
+OnFailure=bm-failure@%n.service
+
+[Service]
+Type=oneshot
+Nice=19
+IOSchedulingClass=idle
+TimeoutStartSec=4h
+ExecStart=/opt/backup-manager/bm check --deep
+ExecStart=/opt/backup-manager/bm drill

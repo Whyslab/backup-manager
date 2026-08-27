@@ -1,0 +1,372 @@
+#!/usr/bin/env bash
+# bm — the single entry point to the backup system.
+# Everything goes through borg; what gets backed up is described in config/sources.json.
+
+BASE_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+
+source "${BASE_DIR}/lib/core.sh"
+source "${BASE_DIR}/lib/config.sh"
+source "${BASE_DIR}/lib/notify.sh"
+source "${BASE_DIR}/lib/packages.sh"
+source "${BASE_DIR}/lib/manifest.sh"
+source "${BASE_DIR}/lib/engine.sh"
+
+usage() {
+    cat <<'USAGE'
+bm — borg-based backup
+
+  bm init                        create the repository and passphrase, print the key
+  bm backup [--tier 1|full] [--dry-run]
+                                 take a snapshot; defaults to --tier 1
+  bm list [--tier 1|full]        list archives
+  bm status                      last snapshot, space used, deduplication
+  bm check [--deep]              integrity check (--deep reads all data)
+  bm mount [archive]             mount at /mnt/backup to pick individual files
+  bm umount                      unmount
+  bm restore <archive> [path...] extract to /var/tmp/bm-restore-<date>
+  bm restore --to-system <archive> [path...]
+                                 write over the live system (dangerous, asks to confirm)
+  bm drill                       restore drill: sample files, extract, compare
+  bm sources [--check]           what goes into a backup
+  bm refresh-status              rebuild status.json for the status bar
+
+Repository passphrase: /etc/backup-manager/passphrase (600 root:root)
+USAGE
+}
+
+# ---------------------------------------------------------------- commands
+
+cmd_init() {
+    require_root; config_load
+    check_deps borg jq openssl
+    engine_init
+    engine_env
+
+    echo
+    printf '%b\n' "${YELLOW}=============================================================${NC}"
+    printf '%b\n' "${YELLOW} WRITE THIS DOWN SOMEWHERE OFF THIS MACHINE.${NC}"
+    printf '%b\n' "${YELLOW} Without the key and passphrase the repository is${NC}"
+    printf '%b\n' "${YELLOW} unreadable, even with every file intact.${NC}"
+    printf '%b\n' "${YELLOW}=============================================================${NC}"
+    echo
+    echo "Passphrase (${PASSPHRASE_FILE}):"
+    echo "    $(cat "$PASSPHRASE_FILE")"
+    echo
+    echo "Repository key (paper form):"
+    borg key export --paper "$REPO"
+    echo
+    printf '%b\n' "${YELLOW}=============================================================${NC}"
+}
+
+cmd_backup() {
+    local tier=1 dry=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --tier) tier=$2; shift 2 ;;
+            --dry-run) dry="--dry-run"; shift ;;
+            *) log_err "Unknown argument: $1"; exit 1 ;;
+        esac
+    done
+    [[ "$tier" == "1" || "$tier" == "full" ]] || { log_err "--tier accepts 1 or full"; exit 1; }
+    [[ "$tier" == "full" ]] && tier=all
+
+    require_root; config_load
+    check_deps borg jq
+    engine_require_repo
+    engine_env
+
+    if [[ -n "$dry" ]]; then
+        engine_create "$tier" --dry-run
+        return 0
+    fi
+
+    local start=$SECONDS name
+    name=$(engine_create "$tier" | tail -1)
+    engine_prune
+    write_status
+    local dur=$(( SECONDS - start ))
+
+    log_info "Done in ${dur}s: ${name}"
+    notify_ok "Snapshot created: ${name} (${dur}s)"
+}
+
+cmd_list() {
+    local tier=${2:-}
+    require_root; config_load; engine_require_repo; engine_env
+    local glob=""
+    case "$tier" in
+        1)    glob="bm-t1-*" ;;
+        full) glob="bm-full-*" ;;
+    esac
+    if [[ -n "$glob" ]]; then
+        borg list --glob-archives "$glob" --format '{archive:<34} {time}  {comment}{NL}' "$REPO"
+    else
+        borg list --format '{archive:<34} {time}  {comment}{NL}' "$REPO"
+    fi
+}
+
+cmd_status() {
+    require_root; config_load; engine_require_repo; engine_env
+
+    echo "Repository : ${REPO}"
+    echo "Passphrase : ${PASSPHRASE_FILE}"
+    echo
+
+    local last last_ts age_h
+    last=$(borg list --last 1 --format '{archive}{TAB}{time}' "$REPO" 2>/dev/null || true)
+    if [[ -z "$last" ]]; then
+        log_warn "No archives in the repository yet"
+    else
+        echo "Last snapshot : ${last%%	*}"
+        last_ts=$(borg list --last 1 --format '{time}' "$REPO")
+        echo "                   ${last_ts}"
+        age_h=$(( ( $(date +%s) - $(date -d "$last_ts" +%s) ) / 3600 ))
+        if (( age_h > STALE_AFTER_HOURS )); then
+            printf '%b\n' "${RED}WARNING: last snapshot is ${age_h}h old (threshold ${STALE_AFTER_HOURS}h)${NC}"
+        else
+            printf '%b\n' "${GREEN}Age: ${age_h}h — fine${NC}"
+        fi
+    fi
+    echo
+    echo "Archives: $(borg list --format '{archive}{NL}' "$REPO" | wc -l)"
+    echo
+    borg info "$REPO" | sed -n '/Original size/,$p'
+    echo
+    if [[ -f "${STATE_DIR}/last-check" ]]; then
+        echo "Last integrity check: $(cat "${STATE_DIR}/last-check")"
+    else
+        log_warn "Integrity check has never run"
+    fi
+    if [[ -f "${STATE_DIR}/last-drill" ]]; then
+        echo "Last restore drill: $(cat "${STATE_DIR}/last-drill")"
+    else
+        log_warn "Restore drill has never run"
+    fi
+    echo
+    echo "Timers:"
+    systemctl list-timers --all --no-pager --no-legend 'bm-*' || true
+}
+
+cmd_check() {
+    require_root; config_load; engine_require_repo; engine_env
+    install -d -m 755 "$STATE_DIR"
+    if engine_check "${2:-}"; then
+        write_status
+        notify_ok "Integrity check passed"
+    else
+        notify_fail "INTEGRITY CHECK FAILED. See /var/log/backup-manager/errors.log"
+        exit 1
+    fi
+}
+
+cmd_mount() {
+    require_root; config_load; engine_require_repo; engine_env
+    check_deps borg fusermount3
+    local archive=${2:-}
+    install -d -m 755 "$MOUNT_POINT"
+    if mountpoint -q "$MOUNT_POINT"; then
+        log_warn "Already mounted: ${MOUNT_POINT}"
+        return 0
+    fi
+    if [[ -n "$archive" ]]; then
+        borg mount "::${archive}" "$MOUNT_POINT"
+    else
+        borg mount "$REPO" "$MOUNT_POINT"
+    fi
+    log_info "Mounted: ${MOUNT_POINT}"
+    echo "Grab a file:  cp ${MOUNT_POINT}/<archive>/home/<user>/... /destination"
+    echo "Unmount:      bm umount"
+}
+
+cmd_umount() {
+    require_root; config_load
+    if mountpoint -q "$MOUNT_POINT"; then
+        borg umount "$MOUNT_POINT"
+        log_info "Unmounted: ${MOUNT_POINT}"
+    else
+        log_info "Nothing mounted at ${MOUNT_POINT}"
+    fi
+}
+
+cmd_restore() {
+    shift
+    local to_system=0
+    if [[ "${1:-}" == "--to-system" ]]; then to_system=1; shift; fi
+
+    local archive=${1:-}
+    [[ -n "$archive" ]] || { log_err "Name an archive. List them: bm list"; exit 1; }
+    shift || true
+
+    require_root; config_load; engine_require_repo; engine_env
+
+    # borg stores paths without the leading slash.
+    local -a paths=()
+    local p
+    for p in "$@"; do paths+=("${p#/}"); done
+
+    if (( to_system == 0 )); then
+        local staging="${RESTORE_STAGING}/bm-restore-$(date +%Y%m%d_%H%M%S)"
+        install -d -m 700 "$staging"
+        log_step "Extracting to ${staging} (the live system is not touched)"
+        ( cd "$staging" && borg extract --list "::${archive}" "${paths[@]}" )
+        log_info "Done. Contents are here: ${staging}"
+        echo
+        echo "Compare against the live system, for example:"
+        echo "  diff -ru ${staging}/etc /etc | less"
+        echo "Copy what you need by hand, once you are sure it is the right thing."
+        return 0
+    fi
+
+    printf '%b\n' "${RED}WARNING: files will be written over the live system.${NC}"
+    echo "Archive: ${archive}"
+    if (( ${#paths[@]} )); then
+        echo "Paths  : ${paths[*]}"
+    else
+        echo "Paths  : THE ENTIRE ARCHIVE"
+    fi
+    read -rp "Type RESTORE to continue: " confirm
+    [[ "$confirm" == "RESTORE" ]] || { echo "Cancelled."; exit 0; }
+
+    log_step "Writing over the system from ${archive}"
+    ( cd / && borg extract --list "::${archive}" "${paths[@]}" )
+    systemctl daemon-reload
+    log_info "Restore finished. A reboot is recommended."
+    notify_warn "Restore from ${archive} finished"
+}
+
+cmd_drill() {
+    require_root; config_load; engine_require_repo; engine_env
+    install -d -m 755 "$STATE_DIR"
+
+    local archive; archive=$(engine_last_archive)
+    [[ -n "$archive" ]] || { log_err "No archives to drill against"; exit 1; }
+
+    local work; work=$(mktemp -d /var/tmp/bm-drill-XXXXXX)
+    cleanup_register "$work"
+
+    log_step "Restore drill from ${archive}"
+
+    # Regular files only, and only those that still exist on disk —
+    # otherwise there is nothing to compare against.
+    local list="${work}/all.txt" sample="${work}/sample.txt"
+    borg list --format '{type} {path}{NL}' "::${archive}" \
+        | awk '$1=="-" {sub(/^- /,""); print}' > "$list"
+
+    local total; total=$(wc -l < "$list")
+    log_info "Files in the archive: ${total}"
+
+    # shuf writes to a file rather than a pipe: breaking out of the loop closes
+    # the pipe, shuf gets SIGPIPE, and pipefail turns that into a failure.
+    shuf "$list" > "${work}/shuffled.txt"
+    : > "$sample"
+    local count=0 f
+    while IFS= read -r f; do
+        (( count < DRILL_SAMPLE_SIZE )) || break
+        if [[ -f "/${f}" ]]; then
+            printf '%s\n' "$f" >> "$sample"
+            count=$(( count + 1 ))
+        fi
+    done < "${work}/shuffled.txt"
+
+    local n; n=$(wc -l < "$sample")
+    (( n > 0 )) || { log_err "Could not assemble a sample to compare"; exit 1; }
+    log_info "Sample size: ${n} files"
+
+    local extract_dir="${work}/extract"
+    install -d -m 700 "$extract_dir"
+
+    log_step "Extracting the sample"
+    if ! ( cd "$extract_dir" && xargs -a "$sample" -d '\n' borg extract "::${archive}" ); then
+        log_err "EXTRACTION FAILED — this backup does not work"
+        notify_fail "RESTORE DRILL FAILED: ${archive} does not extract"
+        exit 1
+    fi
+
+    local same=0 diff=0 absent=0
+    while IFS= read -r f; do
+        if [[ ! -f "${extract_dir}/${f}" ]]; then
+            absent=$(( absent + 1 ))
+            log_err "Did not extract: /${f}"
+        elif cmp -s "${extract_dir}/${f}" "/${f}"; then
+            same=$(( same + 1 ))
+        else
+            diff=$(( diff + 1 ))
+        fi
+    done < "$sample"
+
+    echo
+    log_info "Identical to the live system : ${same}"
+    log_info "Differs (changed since the snapshot) : ${diff}"
+    log_info "Failed to extract : ${absent}"
+
+    if (( absent > 0 )); then
+        log_err "Restore drill FAILED: ${absent} files did not extract"
+        notify_fail "RESTORE DRILL FAILED: ${absent} files did not extract"
+        exit 1
+    fi
+
+    date -u +"%Y-%m-%dT%H:%M:%SZ" > "${STATE_DIR}/last-drill"
+    write_status
+    log_info "Restore drill passed: all ${n} files extracted and read back correctly"
+    notify_ok "Restore drill passed (${n} files from ${archive})"
+}
+
+cmd_refresh_status() {
+    require_root; config_load; engine_require_repo; engine_env
+    write_status
+    log_info "Status refreshed: ${STATE_DIR}/status.json"
+    cat "${STATE_DIR}/status.json"
+}
+
+cmd_sources() {
+    config_load
+    local tier
+    printf '%-4s %-6s %-9s %s\n' "TIER" "FOUND" "SIZE" "PATH"
+    printf '%s\n' "----------------------------------------------------------------------"
+    local line src_path abs t size mark
+    while IFS= read -r line; do
+        src_path=$(jq -r '.path' <<<"$line")
+        t=$(jq -r '.tier' <<<"$line")
+        abs=$(expand_path "$src_path")
+        if [[ -e "$abs" ]]; then
+            mark="yes"
+            size=$(dir_size "$abs")
+        else
+            mark="NO"; size="-"
+        fi
+        printf '%-4s %-6s %-9s %s\n' "$t" "$mark" "$size" "$abs"
+    done < <(jq -c '.sources[]' "$SOURCES_FILE")
+
+    echo
+    echo "Global exclusions (never):"
+    jq -r '.never[] | "  " + .' "$SOURCES_FILE"
+    echo
+    for tier in 1 all; do
+        build_tier "$tier"
+        echo "Tier '${tier}': ${#ROOTS[@]} sources, $(( ${#EXCLUDE_ARGS[@]} / 2 )) exclusions"
+        if (( ${#MISSING_PATHS[@]} )); then
+            local p
+            for p in "${MISSING_PATHS[@]}"; do
+                printf '%b\n' "  ${YELLOW}missing: ${p}${NC}"
+            done
+        fi
+    done
+}
+
+# ---------------------------------------------------------------- dispatch
+
+case "${1:-}" in
+    init)     cmd_init ;;
+    backup)   shift; cmd_backup "$@" ;;
+    list)     cmd_list "$@" ;;
+    status)   cmd_status ;;
+    check)    cmd_check "$@" ;;
+    mount)    cmd_mount "$@" ;;
+    umount)   cmd_umount ;;
+    restore)  cmd_restore "$@" ;;
+    drill)    cmd_drill ;;
+    sources)        cmd_sources ;;
+    refresh-status) cmd_refresh_status ;;
+    ""|-h|--help|help) usage ;;
+    *) echo "Unknown command: $1" >&2; echo; usage; exit 1 ;;
+esac

@@ -1,0 +1,12 @@
+[Unit]
+Description=Repository integrity check
+After=local-fs.target
+ConditionPathExists=/etc/backup-manager/passphrase
+OnFailure=bm-failure@%n.service
+
+[Service]
+Type=oneshot
+Nice=19
+IOSchedulingClass=idle
+TimeoutStartSec=4h
+ExecStart=/opt/backup-manager/bm check

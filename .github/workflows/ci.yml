@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  shell:
+    name: Shell scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Syntax check
+        run: |
+          find . \( -name '*.sh' -o -name bm \) -print0 | xargs -0 -n1 bash -n
+
+      - name: ShellCheck
+        uses: ludeeus/action-shellcheck@master
+        with:
+          severity: warning
+
+  config:
+    name: Shipped configuration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Every shipped JSON parses
+        run: |
+          for f in config/*.json; do jq empty "$f" || exit 1; done
+
+      # settings.example.json carries __USER__ / __HOME__ tokens that install.sh
+      # substitutes. If a token is added to the template and forgotten in the
+      # installer, the installed config keeps a literal __HOME__ path and borg
+      # fails on the first run with a confusing error. Catch it here.
+      - name: Every placeholder is substituted by the installer
+        run: |
+          set -euo pipefail
+          status=0
+          for t in $(grep -o '__[A-Z_]*__' config/settings.example.json | sort -u); do
+            grep -q -- "$t" install.sh || { echo "::error file=install.sh::does not substitute $t"; status=1; }
+          done
+          exit "$status"
+
+  privacy:
+    name: Nothing personal shipped
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # This repository was extracted from a working machine. Anything that
+      # identifies that machine is a bug, not a detail.
+      - name: No personal identifiers, no absolute home paths
+        run: |
+          set -euo pipefail
+          status=0
+          if grep -rniE 'bogdan|dodg1403' . --exclude-dir=.git --exclude='run-tests.sh' --exclude='ci.yml'; then
+            echo "::error::personal identifier found"; status=1
+          fi
+          if grep -rnE '/home/[a-z][a-z0-9_-]*/' . --exclude-dir=.git --exclude='*.md' --exclude='ci.yml'; then
+            echo "::error::hard-coded home path found"; status=1
+          fi
+          exit "$status"
+
+  tests:
+    name: Test suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install what the tests need
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq jq
+
+      - name: Run the test suite
+        run: bash tests/run-tests.sh

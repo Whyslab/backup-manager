@@ -1,0 +1,82 @@
+{
+  "_comment": "The single source of truth: what is backed up, in which tier, and what is left out. Tier 1 runs nightly and stays small; tier 2 is added by the weekly full run. Rule of thumb: include a directory whole and subtract the big things from it, rather than listing wanted paths one by one — that way a new directory is backed up by default instead of being silently missed.",
+  "tiers": {
+    "1": { "name": "critical", "archive_prefix": "bm-t1" },
+    "2": { "name": "bulky",    "archive_prefix": "bm-full" }
+  },
+  "sources": [
+    { "path": "/etc", "tier": 1 },
+    { "path": "/usr/local/bin", "tier": 1 },
+    { "path": "/usr/local/share", "tier": 1 },
+    { "path": "/opt/backup-manager", "tier": 1, "exclude": ["*.orig-*"] },
+
+    { "path": "~/.gnupg", "tier": 1 },
+    { "path": "~/.ssh", "tier": 1 },
+    { "path": "~/.bashrc", "tier": 1 },
+    { "path": "~/.bash_profile", "tier": 1 },
+    { "path": "~/.gitconfig", "tier": 1 },
+
+    {
+      "path": "~/.config",
+      "tier": 1,
+      "_comment": "Browser and editor caches regenerate themselves and are large — never worth storing.",
+      "exclude": [
+        "**/cache2",
+        "**/startupCache",
+        "**/shader-cache",
+        "**/GPUCache",
+        "**/Code Cache",
+        "**/CachedData"
+      ]
+    },
+    { "path": "~/.local/state", "tier": 1 },
+    {
+      "path": "~/.local/share",
+      "tier": 1,
+      "_comment": "Chat history and IDE state are big and survivable — take them weekly, not nightly.",
+      "exclude_unless_full": [
+        "TelegramDesktop",
+        "Steam",
+        "containers",
+        "docker"
+      ]
+    },
+    {
+      "path": "~/Projects",
+      "tier": 1,
+      "_comment": "Source code only; build artefacts are reproducible from it.",
+      "exclude": [
+        "**/node_modules",
+        "**/.venv",
+        "**/venv",
+        "**/__pycache__",
+        "**/target",
+        "**/dist",
+        "**/build",
+        "**/.next",
+        "**/.pytest_cache",
+        "**/*.pyc",
+        "**/.mypy_cache",
+        "**/.ruff_cache"
+      ]
+    },
+    { "path": "~/Documents", "tier": 1 },
+    { "path": "~/Pictures", "tier": 1 },
+
+    { "path": "~/Music", "tier": 2 },
+    { "path": "~/Videos", "tier": 2 }
+  ],
+  "never": [
+    "**/Steam",
+    "**/.steam",
+    "**/steamapps",
+    "**/Trash",
+    "**/.Trash-*",
+    "**/.cache",
+    "**/lost+found",
+    "**/.gvfs",
+    "**/*.sock",
+    "**/*.socket",
+    "**/.#*"
+  ]
+}

@@ -1,0 +1,10 @@
+[Unit]
+Description=Monthly restore drill
+
+[Timer]
+OnCalendar=*-*-01 04:30:00
+RandomizedDelaySec=30m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

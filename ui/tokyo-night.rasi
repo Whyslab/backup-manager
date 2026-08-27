@@ -1,0 +1,79 @@
+/* ui/tokyo-night.rasi — Monochrome Vivid */
+* {
+    bg-col:       #0a0a0acc; /* semi-transparent, so blur shows through */
+    bg-col-light: #0a0a0a;
+    border-col:   #f2f2f2;
+    selected-col: #0a0a0a;
+    accent:       #ffffff;
+    fg-col:       #e8e8e8;
+    fg-col2:      #a8a8a8;
+    grey:         #565658;
+    font: "JetBrainsMono Nerd Font 12";
+}
+
+window {
+    width: 400px;
+    background-color: @bg-col;
+    border: 2px;
+    border-color: @border-col;
+    border-radius: 12px;
+}
+
+mainbox {
+    background-color: transparent;
+}
+
+inputbar {
+    children: [prompt,entry];
+    background-color: transparent;
+    border-radius: 5px;
+    padding: 2px;
+}
+
+prompt {
+    background-color: @accent; /* white background behind the prompt */
+    padding: 6px;
+    text-color: @bg-col-light;
+    border-radius: 3px;
+    margin: 20px 0px 0px 20px;
+}
+
+entry {
+    padding: 6px;
+    margin: 20px 0px 0px 10px;
+    text-color: @fg-col;
+    background-color: transparent;
+}
+
+listview {
+    border: 0px 0px 0px;
+    padding: 6px 0px 0px;
+    margin: 10px 20px 0px 20px;
+    columns: 1;
+    lines: 5;
+    background-color: transparent;
+}
+
+element {
+    padding: 5px;
+    background-color: transparent;
+    text-color: @fg-col;
+    border-radius: 5px;
+}
+
+/* no background on normal or alternating rows */
+element normal.normal, element alternate.normal {
+    background-color: transparent;
+    text-color: @fg-col;
+}
+
+element selected {
+    background-color: @accent;
+    text-color: @bg-col-light;
+}
+
+/* make text and icons inherit the transparent background */
+element-text, element-icon {
+    background-color: inherit;
+    text-color: inherit;
+}

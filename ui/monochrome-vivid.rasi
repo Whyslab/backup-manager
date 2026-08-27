@@ -1,0 +1,111 @@
+/**
+ * Rofi Command Center -- Monochrome Vivid theme
+ *
+ * Adapted directly from the user's own ~/.config/rofi/config.rasi (the
+ * drun app launcher): deep black background, grey midtones for secondary
+ * surfaces, and a stark white/black inverted selection instead of a soft
+ * highlight. No hue anywhere on purpose -- risk level for dangerous
+ * commands is conveyed through the existing warning glyph + bold text in
+ * main.py, not through color, to stay true to the palette.
+ */
+
+* {
+    bg-base:      #0a0a0a;   /* Deep black window background */
+    bg-elevated:  #161616;   /* Dark grey -- search bar / message surface */
+    bg-selected:  #ffffff;   /* Selected row: solid white, not a soft tint */
+    fg-primary:   #ffffff;   /* White body text */
+    fg-secondary: #666666;   /* Grey -- placeholder / prompt label */
+    accent-text:  #000000;   /* Black text on the white selected row */
+    border-color: #222222;   /* Window border */
+
+    background-color: transparent;
+    text-color:        @fg-primary;
+    font:              "JetBrainsMono Nerd Font 11";
+}
+
+window {
+    transparency:     "real";
+    background-color: @bg-base;
+    border:            1px;
+    border-color:       @border-color;
+    border-radius:      16px;
+    padding:            20px;
+    width:              620px;
+    location:           center;
+    anchor:              center;
+}
+
+mainbox {
+    background-color: transparent;
+    spacing: 15px;
+    children: [ inputbar, message, listview ];
+}
+
+inputbar {
+    background-color: @bg-elevated;
+    border-radius:     12px;
+    padding:            12px 16px;
+    spacing:            12px;
+    children: [ prompt, entry ];
+}
+
+prompt {
+    background-color: transparent;
+    text-color:         @fg-secondary;
+    vertical-align:     0.5;
+}
+
+entry {
+    background-color: transparent;
+    text-color:         @fg-primary;
+    placeholder:        "Type to search...";
+    placeholder-color:  @fg-secondary;
+    vertical-align:     0.5;
+}
+
+message {
+    background-color: @bg-elevated;
+    border-radius:     12px;
+    padding:            10px 14px;
+    text-color:         @fg-primary;
+}
+
+textbox {
+    background-color: transparent;
+}
+
+listview {
+    background-color: transparent;
+    spacing:            6px;
+    lines:              12;
+    cycle:              true;
+    dynamic:             true;
+    scrollbar:           false;
+    fixed-height:        false;
+    border:              0;
+}
+
+element {
+    background-color: transparent;
+    text-color:         @fg-primary;
+    border-radius:      10px;
+    padding:             10px 14px;
+    spacing:             12px;
+    orientation:         horizontal;
+}
+
+element normal.normal, element alternate.normal {
+    background-color: transparent;
+    text-color:         @fg-primary;
+}
+
+element selected.normal {
+    background-color: @bg-selected;
+    text-color:         @accent-text;
+}
+
+element-text {
+    vertical-align:    0.5;
+    text-color:         inherit;
+    background-color:  transparent;
+}
