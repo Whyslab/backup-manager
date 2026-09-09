@@ -93,10 +93,20 @@ engine_create() {
     ROOTS+=("$STATE_DIR")
 
     log_step "Snapshot (tier ${tier}): ${#ROOTS[@]} sources"
-    local out
+    local out rc=0
     out=$(borg create --json --stats \
             "${common[@]}" "${EXCLUDE_ARGS[@]}" \
-            "::${prefix}-{now:%Y%m%d_%H%M%S}" "${ROOTS[@]}")
+            "::${prefix}-{now:%Y%m%d_%H%M%S}" "${ROOTS[@]}") || rc=$?
+    # borg's own exit codes: 1 is a warning (e.g. a source file changed while
+    # being read), not a failure — the archive is still written. Only 2+ is
+    # a real error. Without this, `set -e` aborted the whole run (and the
+    # systemd unit) on every warning, skipping prune/check/status.
+    if (( rc > 1 )); then
+        log_err "borg create failed (code ${rc})"
+        exit "$rc"
+    elif (( rc == 1 )); then
+        log_warn "borg create finished with a warning (code 1) — a source file changed during backup; archive was still written"
+    fi
 
     local name orig comp dedup nfiles
     name=$(jq -r '.archive.name'                          <<<"$out")
