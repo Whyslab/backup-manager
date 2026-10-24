@@ -104,6 +104,37 @@ for f in "$TMP/fresh.json" "$TMP/stale.json" "$TMP/does-not-exist.json"; do
 done
 
 # --------------------------------------------------------------------------
+group "A repository on another machine (ssh://)"
+# --------------------------------------------------------------------------
+# A remote repo must not be created or chmod-ed locally, and its "rsh" must
+# reach borg as BORG_RSH. A local repo must keep working as before.
+mkdir -p "$TMP/remote/config"
+cp "$ROOT/config/sources.example.json" "$TMP/remote/config/sources.json"
+jq '.target_user = "root" | .targets[0].repo = "ssh://bm@backup.example/srv/repo"
+    | .targets[0].rsh = "ssh -i /root/.ssh/bm_key"' \
+    "$ROOT/config/settings.example.json" > "$TMP/remote/config/settings.json"
+out=$(BASE_DIR="$TMP/remote" bash -c "
+    source '$ROOT/lib/core.sh'; source '$ROOT/lib/config.sh'; source '$ROOT/lib/engine.sh'
+    config_load; engine_env
+    engine_repo_remote && echo remote; echo \"rsh=\$BORG_RSH\"" 2>&1)
+if grep -q '^remote$' <<<"$out" && grep -q '^rsh=ssh -i /root/.ssh/bm_key$' <<<"$out"; then
+    ok "ssh:// repo is remote and its rsh becomes BORG_RSH"
+else
+    nok "ssh:// repo handling" "$(head -3 <<<"$out")"
+fi
+jq '.target_user = "root" | .targets[0].repo = "/var/backup/repo"' \
+    "$ROOT/config/settings.example.json" > "$TMP/remote/config/settings.json"
+out=$(BASE_DIR="$TMP/remote" bash -c "
+    source '$ROOT/lib/core.sh'; source '$ROOT/lib/config.sh'; source '$ROOT/lib/engine.sh'
+    config_load; engine_env
+    engine_repo_remote && echo remote || echo local; echo \"rsh=\${BORG_RSH:-none}\"" 2>&1)
+if grep -q '^local$' <<<"$out" && grep -q '^rsh=none$' <<<"$out"; then
+    ok "a plain path stays local, BORG_RSH untouched"
+else
+    nok "local repo handling" "$(head -3 <<<"$out")"
+fi
+
+# --------------------------------------------------------------------------
 group "Sizes are locale-independent"
 # --------------------------------------------------------------------------
 # Under a locale with a comma decimal separator numfmt produces "1,5 GB", which

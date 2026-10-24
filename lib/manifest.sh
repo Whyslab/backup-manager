@@ -9,8 +9,13 @@ generate_manifest() {
     kernel_version=$(uname -r)
     # hyprctl cannot see the instance from systemd — read the version from the package.
     hypr_version=$(pacman -Q hyprland 2>/dev/null | awk '{print $2}' || echo "not installed")
-    file_system=$(df -T "$REPO" | awk 'NR==2 {print $2}')
-    uuid=$(lsblk -no UUID "$(df --output=source "$REPO" | tail -1)" 2>/dev/null | head -1 || echo unknown)
+    if engine_repo_remote; then
+        # The archive is on another machine: its disk is not visible from here.
+        file_system="remote"; uuid="remote"
+    else
+        file_system=$(df -T "$REPO" | awk 'NR==2 {print $2}')
+        uuid=$(lsblk -no UUID "$(df --output=source "$REPO" | tail -1)" 2>/dev/null | head -1 || echo unknown)
+    fi
 
     jq -n \
         --arg date "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \

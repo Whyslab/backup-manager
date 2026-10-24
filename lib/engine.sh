@@ -10,11 +10,21 @@ engine_env() {
     export BORG_RELOCATED_REPO_ACCESS_IS_OK=no
     export BORG_UNKNOWN_UNENCRYPTED_REPO_ACCESS_IS_OK=no
     export BORG_HOSTNAME_IS_UNIQUE=yes
+    [[ -n "$REPO_RSH" ]] && export BORG_RSH="$REPO_RSH"
     umask 077
 }
 
+# A repository on another machine: there the server creates and guards the directory.
+engine_repo_remote() {
+    [[ "$REPO" == ssh://* ]]
+}
+
 engine_repo_exists() {
-    [[ -f "${REPO}/config" ]]
+    if engine_repo_remote; then
+        ( engine_env; borg info "$REPO" >/dev/null 2>&1 )
+    else
+        [[ -f "${REPO}/config" ]]
+    fi
 }
 
 engine_require_repo() {
@@ -45,10 +55,10 @@ engine_init() {
         log_info "Using the existing passphrase: ${PASSPHRASE_FILE}"
     fi
 
-    install -d -m 700 -o root -g root "$REPO"
+    engine_repo_remote || install -d -m 700 -o root -g root "$REPO"
     engine_env
     borg init --encryption=repokey-blake2 "$REPO"
-    chmod -R go-rwx "$REPO"
+    engine_repo_remote || chmod -R go-rwx "$REPO"
     log_info "Repository created: ${REPO}"
 }
 

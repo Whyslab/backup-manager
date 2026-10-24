@@ -5,7 +5,7 @@
 # file. ShellCheck sees only one file at a time and reports them as unused.
 # shellcheck disable=SC2034
 # Filled in by config_load
-REAL_USER=""; REAL_HOME=""; REPO=""; PASSPHRASE_FILE=""; COMPRESSION=""
+REAL_USER=""; REAL_HOME=""; REPO=""; REPO_RSH=""; PASSPHRASE_FILE=""; COMPRESSION=""
 MOUNT_POINT=""; RESTORE_STAGING=""; STALE_AFTER_HOURS=""; DRILL_SAMPLE_SIZE=""
 
 # Filled in by build_tier
@@ -30,6 +30,9 @@ config_load() {
     [[ -n "$REAL_HOME" ]] || { log_err "No home directory found for $REAL_USER"; exit 1; }
 
     REPO=$(jq -r '.targets[] | select(.name=="local") | .repo' "$SETTINGS_FILE")
+    # For a repository on another machine (ssh://…): how to connect, e.g.
+    # "ssh -i /root/.ssh/bm_remote -o IdentitiesOnly=yes".
+    REPO_RSH=$(jq -r '.targets[] | select(.name=="local") | .rsh // empty' "$SETTINGS_FILE")
     PASSPHRASE_FILE=$(jq -r '.passphrase_file' "$SETTINGS_FILE")
     COMPRESSION=$(jq -r '.compression' "$SETTINGS_FILE")
     MOUNT_POINT=$(jq -r '.mount_point' "$SETTINGS_FILE")

@@ -226,7 +226,11 @@ Worth being honest about, because a backup you misunderstand is worse than none:
   originals. That covers "I deleted it", "I broke the config", "the update ate
   it" — it does **not** cover the disk dying. `targets` is a list precisely so a
   second destination can be added, but a second tier is not implemented here.
-- **One machine.** No remote repositories, no `borg serve`, no cloud.
+- **One repository at a time.** The `local` target can live on another machine
+  over SSH (`"repo": "ssh://user@host/path"`, `"rsh": "ssh -i /root/.ssh/key"`),
+  ideally behind `borg serve --append-only` in that key's `authorized_keys`, so
+  this machine cannot delete its own history. `prune`/`compact` then have to run
+  on the server. No cloud, and no second copy in parallel.
 - **The passphrase is a single point of failure.** Lose it and the backups are
   gone, whatever their state on disk. The installer says so loudly; it is worth
   taking literally.
