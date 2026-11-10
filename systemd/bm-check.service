@@ -1,6 +1,9 @@
 [Unit]
 Description=Repository integrity check
 After=local-fs.target
+# A missed run catches up the moment the machine wakes, together with the
+# others; they share one borg lock, so run them one after another.
+After=bm-backup.service bm-full.service
 ConditionPathExists=/etc/backup-manager/passphrase
 OnFailure=bm-failure@%n.service
 
@@ -9,4 +12,6 @@ Type=oneshot
 Nice=19
 IOSchedulingClass=idle
 TimeoutStartSec=4h
+# Right after resume Wi-Fi/VPN are not up yet: wait up to 15 min for the repo.
+Environment=BM_REPO_WAIT=900
 ExecStart=/opt/backup-manager/bm check

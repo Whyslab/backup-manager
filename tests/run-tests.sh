@@ -135,6 +135,80 @@ else
 fi
 
 # --------------------------------------------------------------------------
+group "Waiting for an unreachable repository (BM_REPO_WAIT)"
+# --------------------------------------------------------------------------
+# A run that starts the moment a laptop wakes must wait for the network instead
+# of failing; an interactive command must still fail at once. borg is never
+# called: engine_repo_exists is replaced by a counter that succeeds on try N.
+wait_probe() {  # $1 = BM_REPO_WAIT, $2 = try that succeeds (0 = never)
+    BASE_DIR="$TMP/remote" BM_REPO_WAIT="$1" BM_REPO_WAIT_INTERVAL=1 bash -c "
+        source '$ROOT/lib/core.sh'; source '$ROOT/lib/config.sh'; source '$ROOT/lib/engine.sh'
+        config_load
+        n=0; engine_repo_exists() { n=\$((n+1)); (( $2 > 0 && n >= $2 )); }
+        if engine_wait_repo; then echo \"up tries=\$n\"; else echo \"down tries=\$n\"; fi" 2>/dev/null
+}
+out=$(wait_probe 0 0)
+[[ "$out" == "down tries=1" ]] && ok "BM_REPO_WAIT=0: one try, fails at once" \
+    || nok "BM_REPO_WAIT=0 should not retry" "$out"
+out=$(wait_probe 10 3)
+[[ "$out" == "up tries=3" ]] && ok "repo appears on try 3: waits, then succeeds" \
+    || nok "waiting for a repo that comes back" "$out"
+out=$(wait_probe 3 0)
+[[ "$out" == "down tries=4" ]] && ok "gives up after the limit (1 try + 3 retries for 3s)" \
+    || nok "waiting must stop at the limit" "$out"
+out=$(wait_probe abc 0)
+[[ "$out" == "down tries=1" ]] && ok "a non-numeric BM_REPO_WAIT means no waiting" \
+    || nok "non-numeric BM_REPO_WAIT" "$out"
+out=$(wait_probe 08 0)
+[[ "$out" == "down tries=9" ]] && ok "a leading zero is read as decimal (08 = 8 retries)" \
+    || nok "BM_REPO_WAIT=08" "$out"
+
+# The real path, end to end: engine_require_repo under core.sh's errexit and
+# ERR trap, a fake borg on PATH that fails like a dead network for its first two
+# calls. It must wait, succeed, and on a permanent failure log borg's reason.
+mkdir -p "$TMP/stub"
+cat > "$TMP/stub/borg" <<'STUB'
+#!/usr/bin/env bash
+n=$(( $(cat "$STUB_COUNT" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$STUB_COUNT"
+(( STUB_OK_ON > 0 && n >= STUB_OK_ON )) && exit 0
+echo "Remote: ssh: connect to host backup.example port 22: Network is unreachable" >&2
+echo "Connection closed by remote host. Is borg working on the server?" >&2
+exit 2
+STUB
+chmod +x "$TMP/stub/borg"
+: > "$TMP/remote/passphrase"
+jq --arg pf "$TMP/remote/passphrase" '.target_user = "root"
+    | .targets[0].repo = "ssh://bm@backup.example/srv/repo" | .passphrase_file = $pf' \
+    "$ROOT/config/settings.example.json" > "$TMP/remote/config/settings.json"
+real_probe() {  # $1 = BM_REPO_WAIT, $2 = borg call that succeeds (0 = never)
+    rm -f "$TMP/stub/count"
+    PATH="$TMP/stub:$PATH" STUB_COUNT="$TMP/stub/count" STUB_OK_ON="$2" \
+    BASE_DIR="$TMP/remote" BM_REPO_WAIT="$1" BM_REPO_WAIT_INTERVAL=1 bash -c "
+        source '$ROOT/lib/core.sh'; source '$ROOT/lib/config.sh'; source '$ROOT/lib/engine.sh'
+        config_load; engine_require_repo; echo PASSED" 2>&1
+    echo "rc=$? calls=$(cat "$TMP/stub/count" 2>/dev/null)"
+}
+out=$(real_probe 5 3)
+if grep -q '^PASSED$' <<<"$out" && grep -q 'rc=0 calls=3' <<<"$out" \
+   && grep -q 'Network is unreachable\|Is borg working' <<<"$out"; then
+    ok "real path: waits through two network failures, then proceeds"
+else nok "real path with a repo that comes back" "$(tail -3 <<<"$out")"; fi
+out=$(real_probe 2 0)
+if ! grep -q '^PASSED$' <<<"$out" && grep -q 'rc=1 calls=3' <<<"$out" \
+   && grep -q 'ERROR.*unreachable.*borg: Remote: ssh: .*Network is unreachable / Connection closed' <<<"$out"; then
+    ok "real path: gives up with exit 1 and names borg's reason"
+else nok "real path with a repo that never comes back" "$(tail -3 <<<"$out")"; fi
+out=$(real_probe 0 0)
+grep -q 'rc=1 calls=1' <<<"$out" && ok "real path: an interactive command (no BM_REPO_WAIT) fails at once" \
+    || nok "real path without BM_REPO_WAIT" "$(tail -2 <<<"$out")"
+
+# Every timer-driven unit must actually ask for the wait, or none of this runs.
+for u in bm-backup bm-full bm-check bm-drill; do
+    grep -q '^Environment=BM_REPO_WAIT=[1-9]' "$ROOT/systemd/$u.service" \
+        && ok "$u.service sets BM_REPO_WAIT" || nok "$u.service does not set BM_REPO_WAIT"
+done
+
+# --------------------------------------------------------------------------
 group "Sizes are locale-independent"
 # --------------------------------------------------------------------------
 # Under a locale with a comma decimal separator numfmt produces "1,5 GB", which

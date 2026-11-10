@@ -19,17 +19,60 @@ engine_repo_remote() {
     [[ "$REPO" == ssh://* ]]
 }
 
+# Why the last remote probe failed (last two lines of borg's stderr), for the log.
+ENGINE_REPO_ERR=""
+
 engine_repo_exists() {
     if engine_repo_remote; then
-        ( engine_env; borg info "$REPO" >/dev/null 2>&1 )
+        local err
+        if err=$( engine_env; borg info "$REPO" 2>&1 >/dev/null ); then
+            ENGINE_REPO_ERR=""
+            return 0
+        fi
+        # Two lines: for a network failure the last one is borg's generic
+        # "Connection closed by remote host", the real ssh error is just above it.
+        ENGINE_REPO_ERR=$(awk 'NF { l[++n] = $0 } END { if (n > 1) printf "%s / ", l[n-1]; if (n) print l[n] }' <<<"$err")
+        return 1
     else
         [[ -f "${REPO}/config" ]]
     fi
 }
 
+# BM_REPO_WAIT — roughly how many seconds to keep retrying an unreachable
+# repository (default 0). The timer-driven units set it: a missed run fires the
+# moment a laptop wakes, before Wi-Fi and the VPN are up, and a remote repo is
+# not reachable yet. Interactive commands keep 0 and fail at once.
+#
+# Retries are counted, not timed against the clock: sleep stops while the
+# machine is suspended, so a clock deadline would be used up by a nap and the
+# run would fail on the first try after the next resume — the very failure this
+# is here to prevent.
+engine_wait_repo() {
+    local wait=${BM_REPO_WAIT:-0} interval=${BM_REPO_WAIT_INTERVAL:-30} tries i
+    [[ "$wait" =~ ^[0-9]+$ ]] && wait=$((10#$wait)) || wait=0
+    [[ "$interval" =~ ^[0-9]+$ ]] && interval=$((10#$interval)) || interval=30
+    (( interval > 0 )) || interval=30
+    engine_repo_exists && return 0
+    (( wait > 0 )) || return 1
+    tries=$(( (wait + interval - 1) / interval ))
+    log_warn "Repository not reachable yet (${ENGINE_REPO_ERR:-no details}); retrying every ${interval}s, ${tries} times: ${REPO}"
+    for (( i = 1; i <= tries; i++ )); do
+        sleep "$interval"
+        if engine_repo_exists; then
+            log_info "Repository reachable on retry ${i}"
+            return 0
+        fi
+    done
+    return 1
+}
+
 engine_require_repo() {
-    engine_repo_exists || {
-        log_err "Repository not found: ${REPO}. Run this first: bm init"
+    engine_wait_repo || {
+        if engine_repo_remote; then
+            log_err "Repository unreachable: ${REPO}${ENGINE_REPO_ERR:+ (borg: ${ENGINE_REPO_ERR})}. If it was never created: bm init"
+        else
+            log_err "Repository not found: ${REPO}. Run this first: bm init"
+        fi
         exit 1
     }
     [[ -r "$PASSPHRASE_FILE" ]] || {

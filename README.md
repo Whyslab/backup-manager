@@ -152,6 +152,13 @@ Every timer is `Persistent=true`, so a run missed while the machine was off
 happens after the next boot. All of them run at `Nice=19` with idle I/O
 priority, so a backup never competes with what you are doing.
 
+A missed run also fires the moment a sleeping laptop wakes — before Wi-Fi or a
+VPN is back. So the units set `BM_REPO_WAIT=900`: an unreachable repository is
+retried every 30 s for up to 15 minutes (counted in tries, so another nap in
+between does not use the time up), and borg's own reason goes to the journal if
+it never comes back. Catch-up runs are ordered (backup → full → check → drill),
+because they share one repository lock. Commands you type keep failing at once.
+
 ### The menu
 
 `backup-manager` opens a rofi menu over the same commands — bind it to a key if
@@ -227,7 +234,8 @@ Worth being honest about, because a backup you misunderstand is worse than none:
   it" — it does **not** cover the disk dying. `targets` is a list precisely so a
   second destination can be added, but a second tier is not implemented here.
 - **One repository at a time.** The `local` target can live on another machine
-  over SSH (`"repo": "ssh://user@host/path"`, `"rsh": "ssh -i /root/.ssh/key"`),
+  over SSH (`"repo": "ssh://user@host/path"`, `"rsh": "ssh -i /root/.ssh/key -o ServerAliveInterval=15"` —
+  the keepalive stops a dead link from hanging a run for hours),
   ideally behind `borg serve --append-only` in that key's `authorized_keys`, so
   this machine cannot delete its own history. `prune`/`compact` then have to run
   on the server. No cloud, and no second copy in parallel.
